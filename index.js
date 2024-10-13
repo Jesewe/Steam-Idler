@@ -5,44 +5,68 @@ const accounts = [
     // Add more accounts as needed
 ];
 
-// Utility function for a delay between logins
+// Utility function for delay
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function login(index) {
-    if (index < accounts.length) {
-        const account = accounts[index];
-        const user = new SteamUser();
+// Max retry attempts per account
+const MAX_RETRIES = 3;
 
-        user.on('loggedOn', () => {
-            console.log(`${account.accountName} - Successful login`);
-            user.setPersona(SteamUser.EPersonaState.Invisible);  // 1 - online, 7 - invisible
-            user.gamesPlayed([730]);  // List app IDs (730 is CS2)
-            // Move on to the next account after a delay
-            delay(3000).then(() => login(index + 1));
-        });
+async function login(index, retryCount = 0) {
+    if (index >= accounts.length) {
+        console.log('All accounts have been processed.');
+        return;
+    }
 
-        user.on('error', (err) => {
-            console.error(`${account.accountName} - Login failed: ${err.message}`);
-            // Attempt to log in to the next account after a delay
-            delay(3000).then(() => login(index + 1));
-        });
+    const account = accounts[index];
+    const user = new SteamUser();
 
-        user.on('disconnected', (eresult, msg) => {
-            console.warn(`${account.accountName} - Disconnected: ${msg}`);
-            // Move to the next account on disconnect
-            delay(3000).then(() => login(index + 1));
-        });
+    // Handle successful login
+    user.on('loggedOn', async () => {
+        console.log(`${account.accountName} - Successful login`);
+        user.setPersona(SteamUser.EPersonaState.Invisible);
+        user.gamesPlayed([730]); // Example: Playing CS2 (app ID 730)
+        await delay(3000);  // Wait before moving to the next account
+        await login(index + 1);  // Move to next account
+    });
 
+    // Handle login error
+    user.on('error', async (err) => {
+        console.error(`${account.accountName} - Login failed: ${err.message}`);
+        await handleFailure(index, retryCount, err);
+    });
+
+    // Handle disconnection
+    user.on('disconnected', async (eresult, msg) => {
+        console.warn(`${account.accountName} - Disconnected: ${msg}`);
+        await handleFailure(index, retryCount, msg);
+    });
+
+    // Log into Steam
+    try {
         user.logOn({
             accountName: account.accountName,
             password: account.password,
         });
-    } else {
-        console.log('All accounts have been processed.');
+    } catch (err) {
+        console.error(`Unexpected error: ${err.message}`);
+        await handleFailure(index, retryCount, err);
     }
 }
 
-// Start the login process with the first account
+// Function to handle retries or move to the next account
+async function handleFailure(index, retryCount, err) {
+    if (retryCount < MAX_RETRIES) {
+        console.log(`${accounts[index].accountName} - Retrying login (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
+        await delay(3000);  // Wait before retrying
+        await login(index, retryCount + 1);  // Retry same account
+    } else {
+        console.log(`${accounts[index].accountName} - Maximum retries reached. Moving to next account.`);
+        await delay(3000);  // Wait before moving to the next account
+        await login(index + 1);  // Move to next account
+    }
+}
+
+// Start login process
 login(0);
